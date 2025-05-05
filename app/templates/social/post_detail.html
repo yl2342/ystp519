@@ -1,0 +1,166 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row">
+        <div class="col-lg-8 mx-auto">
+            <!-- Trading Post Card -->
+            <div class="card shadow mb-4">
+                <div class="card-body">
+                    <!-- Post Header -->
+                    <div class="d-flex mb-3">
+                        <div class="flex-shrink-0">
+                            <img src="{{ url_for('static', filename=post.author.get_avatar_url()) }}" 
+                                 alt="{{ post.author.first_name }}" class="rounded-circle" width="60" height="60">
+                        </div>
+                        <div class="ms-3">
+                            <h2 class="h5 mb-0">
+                                <a href="{{ url_for('social.user_profile', user_id=post.author.id) }}" class="text-decoration-none">
+                                    {{ post.author.first_name }} {{ post.author.last_name }}
+                                </a>
+                            </h2>
+                            <div class="text-muted small">
+                                {{ post.created_at.strftime('%B %d, %Y at %I:%M %p') }}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Post Content -->
+                    <div class="mb-4">
+                        {% if post.transaction %}
+                        <div class="alert {% if post.transaction.transaction_type == 'buy' %}alert-success{% else %}alert-danger{% endif %} mb-3">
+                            <div class="fw-bold">
+                                {{ post.transaction.transaction_type|upper }}ED {{ post.transaction.quantity|int }} 
+                                shares of {{ post.transaction.ticker }} @ ${{ post.transaction.price|round(2) }}
+                            </div>
+                            <div class="d-flex justify-content-between mt-2">
+                                <div>Total: ${{ (post.transaction.quantity * post.transaction.price)|round(2) }}</div>
+                                <div>{{ post.transaction.timestamp.strftime('%m/%d/%Y') }}</div>
+                            </div>
+                        </div>
+                        {% else %}
+                        <div class="alert {% if post.trade_type == 'buy' %}alert-success{% else %}alert-danger{% endif %} mb-3">
+                            <div class="fw-bold">
+                                {{ post.trade_type|upper }}ED {{ post.quantity|int }} 
+                                shares of {{ post.ticker }} @ ${{ post.price|round(2) }}
+                            </div>
+                            <div class="d-flex justify-content-between mt-2">
+                                <div>Total: ${{ (post.quantity * post.price)|round(2) }}</div>
+                                <div>{{ post.created_at.strftime('%m/%d/%Y') }}</div>
+                            </div>
+                        </div>
+                        {% endif %}
+                        
+                        {% if post.content %}
+                            <p class="lead">{{ post.content }}</p>
+                        {% endif %}
+                    </div>
+                    
+                    <!-- Post Actions -->
+                    <div class="d-flex justify-content-between align-items-center border-top pt-3">
+                        <div>
+                            <button class="btn {% if current_user.id in post.interactions|selectattr('interaction_type', 'equalto', 'like')|map(attribute='user_id')|list %}btn-primary{% else %}btn-outline-primary{% endif %} me-2" 
+                                    hx-post="{{ url_for('social.like_post', post_id=post.id) }}"
+                                    hx-swap="outerHTML"
+                                    hx-target="this"
+                                    hx-headers='{"X-Requested-With": "XMLHttpRequest"}'>
+                                <i class="far fa-thumbs-up me-1"></i> 
+                                <span id="post-likes-{{ post.id }}">{{ post.likes }}</span>
+                            </button>
+                            <button class="btn {% if current_user.id in post.interactions|selectattr('interaction_type', 'equalto', 'dislike')|map(attribute='user_id')|list %}btn-secondary{% else %}btn-outline-secondary{% endif %}" 
+                                    hx-post="{{ url_for('social.dislike_post', post_id=post.id) }}"
+                                    hx-swap="outerHTML"
+                                    hx-target="this"
+                                    hx-headers='{"X-Requested-With": "XMLHttpRequest"}'>
+                                <i class="far fa-thumbs-down me-1"></i> 
+                                <span id="post-dislikes-{{ post.id }}">{{ post.dislikes }}</span>
+                            </button>
+                        </div>
+                        <a href="{{ url_for('trading.stock_detail', ticker=post.ticker) }}" class="btn btn-primary">
+                            <i class="fas fa-chart-line me-1"></i> View {{ post.ticker }}
+                        </a>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Comment Form -->
+            <div class="card shadow mb-4">
+                <div class="card-header bg-light">
+                    <h3 class="h5 mb-0">Add a Comment</h3>
+                </div>
+                <div class="card-body">
+                    <form action="{{ url_for('social.add_comment', post_id=post.id) }}" method="post">
+                        {{ comment_form.hidden_tag() }}
+                        <div class="mb-3">
+                            {{ comment_form.content(class="form-control", rows=3, placeholder="Share your thoughts...") }}
+                            {% if comment_form.content.errors %}
+                                <div class="text-danger small mt-1">
+                                    {% for error in comment_form.content.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">Post Comment</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- Comments Section -->
+            <div class="card shadow">
+                <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                    <h3 class="h5 mb-0">Comments ({{ comments|length }})</h3>
+                </div>
+                <div class="card-body">
+                    {% if comments %}
+                        <div class="comment-list">
+                            {% for comment in comments %}
+                                <div class="comment mb-4" id="comment-{{ comment.id }}">
+                                    <!-- Comment Header -->
+                                    <div class="d-flex">
+                                        <div class="flex-shrink-0">
+                                            <img src="{{ url_for('static', filename=comment.author.get_avatar_url()) }}" 
+                                                 alt="{{ comment.author.first_name }}" class="rounded-circle" width="40" height="40">
+                                        </div>
+                                        <div class="ms-3 flex-grow-1">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <h4 class="h6 mb-0">
+                                                    <a href="{{ url_for('social.user_profile', user_id=comment.author.id) }}" class="text-decoration-none">
+                                                        {{ comment.author.first_name }} {{ comment.author.last_name }}
+                                                    </a>
+                                                </h4>
+                                                <small class="text-muted">
+                                                    {{ comment.created_at.strftime('%b %d, %Y %I:%M %p') }}
+                                                </small>
+                                            </div>
+                                            
+                                            <!-- Comment Content -->
+                                            <div class="mt-2 mb-2">
+                                                {{ comment.content }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="text-center p-4">
+                            <i class="far fa-comment-dots fa-3x text-muted mb-3"></i>
+                            <p>No comments yet. Be the first to comment on this trading post!</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="https://unpkg.com/htmx.org@1.7.0"></script>
+{% endblock %} 

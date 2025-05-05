@@ -1,0 +1,203 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row">
+        <div class="col-lg-9 d-flex">
+            <div class="card shadow h-100 w-100">
+                <div class="card-header bg-primary text-white">
+                    <h2 class="h4 mb-0"><i class="fas fa-search me-2"></i>Find Yale Traders</h2>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('social.search_users') }}">
+                        {{ form.hidden_tag() }}
+                        <div class="input-group mb-3">
+                            {{ form.net_id(class="form-control", placeholder="Search by Yale Net ID") }}
+                            <button class="btn btn-primary" type="submit">
+                                <i class="fas fa-search"></i> Search
+                            </button>
+                        </div>
+                        {% if form.net_id.errors %}
+                            <div class="text-danger small">
+                                {% for error in form.net_id.errors %}
+                                    {{ error }}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        <div class="text-muted small mt-2">
+                            <i class="fas fa-info-circle me-1"></i> Search for fellow Yale students by their Net ID.
+                        </div>
+                    </form>
+
+                    {% if searched %}
+                        <div class="mt-4">
+                            <h3 class="h5 border-bottom pb-2 mb-3">Search Results</h3>
+                            {% if results %}
+                                <div class="list-group">
+                                    {% for user in results %}
+                                        <div class="list-group-item p-3">
+                                            <div class="d-flex align-items-center">
+                                                <div class="flex-shrink-0">
+                                                    <img src="{{ url_for('static', filename=user.get_avatar_url()) }}" 
+                                                         alt="{{ user.first_name }}" class="rounded-circle" width="50" height="50">
+                                                </div>
+                                                <div class="ms-3 flex-grow-1">
+                                                    <h3 class="h6 mb-1">
+                                                        <a href="{{ url_for('social.user_profile', user_id=user.id) }}" class="text-decoration-none">
+                                                            {{ user.first_name }} {{ user.last_name }}
+                                                        </a>
+                                                    </h3>
+                                                    <div class="text-muted small">{{ user.net_id }}</div>
+                                                </div>
+                                                <div>
+                                                    {% if current_user.is_following(user) %}
+                                                        <form action="{{ url_for('social.unfollow_user', user_id=user.id) }}" method="post">
+                                                            <button type="submit" class="btn btn-outline-primary btn-sm">
+                                                                <i class="fas fa-user-minus me-1"></i> Unfollow
+                                                            </button>
+                                                        </form>
+                                                    {% else %}
+                                                        <form action="{{ url_for('social.follow_user', user_id=user.id) }}" method="post">
+                                                            <button type="submit" class="btn btn-primary btn-sm">
+                                                                <i class="fas fa-user-plus me-1"></i> Follow
+                                                            </button>
+                                                        </form>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% else %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle me-2"></i>No users found matching your search criteria.
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% else %}
+                        <div class="text-center mt-5 mb-5">
+                            <img src="{{ url_for('static', filename='img/social.png') }}" 
+                                 alt="Connect" class="img-fluid mb-4" style="max-height: 400px;">
+                            <h3 class="h5">Connect with Yale Traders</h3>
+                            <p class="text-muted">
+                                Search for fellow Yale students to follow their trading activities and learn from their strategies.
+                            </p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-3 d-flex">
+            <!-- Popular Users -->
+            <div class="card shadow h-100 w-100" id="popular-traders-section">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="h4 mb-0">Popular Yale Traders</h3>
+                </div>
+                <div class="d-flex justify-content-center p-2 bg-light border-bottom">
+                    <div class="btn-group btn-group-sm">
+                        <a href="{{ url_for('social.search_users', sort_by='followers', net_id=request.args.get('net_id', '')) }}" 
+                            class="btn btn-outline-primary {{ 'active' if sort_by == 'followers' else '' }}"
+                            hx-get="{{ url_for('social.search_users', sort_by='followers', net_id=request.args.get('net_id', ''), partial=1) }}"
+                            hx-target="#popular-traders-section"
+                            hx-swap="outerHTML">
+                            <i class="fas fa-users me-1"></i> By Followers
+                        </a>
+                        <a href="{{ url_for('social.search_users', sort_by='transactions', net_id=request.args.get('net_id', '')) }}" 
+                            class="btn btn-outline-primary {{ 'active' if sort_by == 'transactions' else '' }}"
+                            hx-get="{{ url_for('social.search_users', sort_by='transactions', net_id=request.args.get('net_id', ''), partial=1) }}"
+                            hx-target="#popular-traders-section"
+                            hx-swap="outerHTML">
+                            <i class="fas fa-chart-line me-1"></i> By Trades
+                        </a>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="list-group list-group-flush">
+                        {% if popular_users %}
+                            {% for user in popular_users %}
+                                <div class="list-group-item py-2 px-3">
+                                    <div class="row align-items-center g-2">
+                                        <div class="col-auto">
+                                            <img src="{{ url_for('static', filename=user.get_avatar_url()) }}" 
+                                                 alt="{{ user.first_name }}" class="rounded-circle" width="45" height="45">
+                                        </div>
+                                        <div class="col">
+                                            <div class="d-flex align-items-center">
+                                                <h4 class="h6 mb-0">
+                                                    <a href="{{ url_for('social.user_profile', user_id=user.id) }}" class="text-decoration-none">
+                                                        {{ user.first_name }} {{ user.last_name }}
+                                                    </a>
+                                                </h4>
+                                            </div>
+                                            <div class="text-muted small">
+                                                {% if sort_by == 'transactions' %}
+                                                    {{ user.tx_count }} trades
+                                                {% else %}
+                                                    {{ user.followers.count() }} followers
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        <div class="col-auto">
+                                            <a href="{{ url_for('social.user_profile', user_id=user.id) }}" class="btn btn-sm btn-outline-primary" style="width: 90px">
+                                                <i class="fas fa-user-plus me-1"></i> Follow
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                            {% if popular_users|length < 5 %}
+                                {% for i in range(5 - popular_users|length) %}
+                                    <div class="list-group-item py-2 px-3 opacity-50">
+                                        <div class="row align-items-center g-2">
+                                            <div class="col-auto">
+                                                <img src="{{ url_for('static', filename='img/avatars/avatar' + ((loop.index % 9) + 1)|string + '.png') }}" 
+                                                     alt="User" class="rounded-circle" width="45" height="45">
+                                            </div>
+                                            <div class="col">
+                                                <div class="d-flex align-items-center">
+                                                    <h4 class="h6 mb-0">Yale Trader</h4>
+                                                </div>
+                                                <div class="text-muted small">0 followers</div>
+                                            </div>
+                                            <div class="col-auto">
+                                                <button class="btn btn-sm btn-outline-primary" disabled style="width: 90px">
+                                                    <i class="fas fa-user-plus me-1"></i> Follow
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            {% endif %}
+                        {% else %}
+                            {% for i in range(5) %}
+                                <div class="list-group-item py-2 px-3 opacity-50">
+                                    <div class="row align-items-center g-2">
+                                        <div class="col-auto">
+                                            <img src="{{ url_for('static', filename='img/avatars/avatar' + ((loop.index % 9) + 1)|string + '.png') }}" 
+                                                 alt="User" class="rounded-circle" width="45" height="45">
+                                        </div>
+                                        <div class="col">
+                                            <div class="d-flex align-items-center">
+                                                <h4 class="h6 mb-0">Yale Trader</h4>
+                                            </div>
+                                            <div class="text-muted small">0 followers</div>
+                                        </div>
+                                        <div class="col-auto">
+                                            <button class="btn btn-sm btn-outline-primary" disabled style="width: 90px">
+                                                <i class="fas fa-user-plus me-1"></i> Follow
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

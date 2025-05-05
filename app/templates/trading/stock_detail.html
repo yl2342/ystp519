@@ -1,0 +1,1649 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block styles %}
+{{ super() }}
+<style>
+    .stock-price {
+        font-size: 2.5rem;
+        font-weight: 600;
+    }
+    .chart-container {
+        height: 300px;
+        width: 100%;
+    }
+    .ai-advice-content h1, 
+    .ai-advice-content h2, 
+    .ai-advice-content h3, 
+    .ai-advice-content h4 {
+        font-size: 1.2rem;
+        margin-top: 1rem;
+        margin-bottom: 0.5rem;
+        font-weight: bold;
+    }
+
+    .ai-advice-content ul, 
+    .ai-advice-content ol {
+        padding-left: 1.5rem;
+    }
+
+    .ai-advice-content p {
+        margin-bottom: 0.75rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row">
+        <div class="col-lg-8">
+            <!-- Stock Header Section -->
+            <div class="card shadow mb-4">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-3">
+                        <div>
+                            <h1 class="h3 mb-1">{{ stock.name }} ({{ stock.ticker }})</h1>
+                            <div class="text-muted">{{ stock.exchange }}</div>
+                        </div>
+                        <div class="text-end">
+                            <div class="stock-price">${{ (stock.current_price|default(0))|round(2) }}</div>
+                            <div class="{% if stock.change_percent >= 0 %}text-success{% else %}text-danger{% endif %} fw-bold">
+                                {% if stock.change_percent >= 0 %}+{% endif %}${{ (stock.change|default(0))|round(2) }} ({{ (stock.change_percent|default(0))|round(2) }}%)
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stock Chart -->
+            <div class="card shadow mb-4">
+                <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                    <h2 class="h5 mb-0">Price History</h2>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" class="btn btn-outline-primary chart-period-btn" data-period="1mo">1M</button>
+                        <button type="button" class="btn btn-outline-primary chart-period-btn" data-period="3mo">3M</button>
+                        <button type="button" class="btn btn-outline-primary active chart-period-btn" data-period="6mo">6M</button>
+                        <button type="button" class="btn btn-outline-primary chart-period-btn" data-period="1y">1Y</button>
+                        <button type="button" class="btn btn-outline-primary chart-period-btn" data-period="max">All</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="stockChart"></canvas>
+                        {% if not historical_data %}
+                        <div id="chart-message" class="text-center text-muted py-5">
+                            Historical price data is currently unavailable for this stock.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stock Details -->
+            <div class="card shadow mb-4">
+                <div class="card-header bg-light">
+                    <h2 class="h5 mb-0">Company Information</h2>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Market Cap</th>
+                                    <td>${{ ((stock.market_cap|default(0)) / 1000000000)|round(2) }}B</td>
+                                </tr>
+                                <tr>
+                                    <th>P/E Ratio</th>
+                                    <td>{{ (stock.pe_ratio|default(0))|round(2) }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Dividend Yield</th>
+                                    <td>{{ (stock.dividend_yield|default(0))|round(2) }}%</td>
+                                </tr>
+                                <tr>
+                                    <th>52-Week High</th>
+                                    <td>${{ (stock.year_high|default(0))|round(2) }}</td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Volume</th>
+                                    <td>{{ (stock.volume|default(0))|int }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Avg Volume</th>
+                                    <td>{{ (stock.avg_volume|default(0))|int }}</td>
+                                </tr>
+                                <tr>
+                                    <th>EPS</th>
+                                    <td>${{ (stock.eps|default(0))|round(2) }}</td>
+                                </tr>
+                                <tr>
+                                    <th>52-Week Low</th>
+                                    <td>${{ (stock.year_low|default(0))|round(2) }}</td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    {% if stock.description %}
+                    <div class="mt-3">
+                        <h3 class="h6 fw-bold">About {{ stock.name }}</h3>
+                        <p>{{ stock.description }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <!-- Recent Transactions -->
+            {% if recent_transactions %}
+            <div class="card shadow mb-4">
+                <div class="card-header bg-light">
+                    <h2 class="h5 mb-0">Your Recent Transactions</h2>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Type</th>
+                                    <th>Shares</th>
+                                    <th>Price</th>
+                                    <th>Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for transaction in recent_transactions %}
+                                <tr>
+                                    <td>{{ transaction.timestamp.strftime('%m/%d/%Y %H:%M') }}</td>
+                                    <td class="{% if transaction.transaction_type == 'buy' %}text-success{% else %}text-danger{% endif %} fw-bold">
+                                        {{ transaction.transaction_type|upper }}
+                                    </td>
+                                    <td>{{ transaction.quantity|int }}</td>
+                                    <td>${{ transaction.price|round(2) }}</td>
+                                    <td>${{ (transaction.quantity * transaction.price)|round(2) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        
+        <div class="col-lg-4">
+            <!-- Trade Form -->
+            <div class="card shadow mb-4 sticky-top" style="top: 20px; z-index: 100;">
+                <div class="card-header bg-primary text-white">
+                    <h2 class="h5 mb-0">Place Order</h2>
+                </div>
+                <div class="card-body">
+                    <form id="trade-form" method="POST" action="{{ url_for('trading.execute_trade') }}">
+                        {{ trade_form.hidden_tag() }}
+                        {{ trade_form.ticker }}
+                        {{ trade_form.company_name }}
+                        {{ trade_form.price }}
+                        
+                        <fieldset class="form-group mb-3">
+                            <legend class="form-label">Action</legend>
+                            <div class="btn-group w-100" role="group" aria-labelledby="action-legend">
+                                <input type="radio" class="btn-check" name="action" value="buy" id="action-buy" 
+                                       {% if not user_holding %}checked{% endif %} autocomplete="off">
+                                <label class="btn btn-outline-success" for="action-buy">Buy</label>
+                                
+                                <input type="radio" class="btn-check" name="action" value="sell" id="action-sell" 
+                                       {% if not user_holding %}disabled{% endif %} autocomplete="off">
+                                <label class="btn btn-outline-danger" for="action-sell">Sell</label>
+                            </div>
+                        </fieldset>
+                        
+                        <div class="form-group mb-3">
+                            <label class="form-label" for="quantity">Quantity</label>
+                            {{ trade_form.quantity(class="form-control", type="number", min="1", step="1") }}
+                        </div>
+                        
+                        <!-- Transaction History Button -->
+                        <div class="d-grid mb-3">
+                            <button type="button" id="viewTransactionsBtn" class="btn btn-outline-secondary">
+                                <i class="bi bi-clock-history me-2"></i>View Transaction History
+                            </button>
+                        </div>
+                        
+                        <!-- AI Assistant Button -->
+                        <div class="d-grid mb-3">
+                            <button type="button" class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#aiTradeAssistModal">
+                                <i class="bi bi-robot me-2"></i>Need AI assist for this trade?
+                            </button>
+                        </div>
+                        
+                        <div class="form-check mb-3">
+                            {{ trade_form.make_public(class="form-check-input") }}
+                            <label class="form-check-label" for="make_public">
+                                Share this trade to public
+                            </label>
+                        </div>
+                        
+                        <div class="form-group mb-3">
+                            <label class="form-label" for="trading_note">Trading Note (optional)</label>
+                            {{ trade_form.trading_note(class="form-control", rows=2, placeholder="Why are you making this trade?") }}
+                        </div>
+                        
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">Submit Order</button>
+                        </div>
+                    </form>
+                    
+                    {% if user_holding %}
+                    <div class="alert alert-info mt-3 mb-0">
+                        <div class="fw-bold">Your Position</div>
+                        <div class="d-flex justify-content-between">
+                            <span>Shares Owned:</span>
+                            <span>{{ user_holding.quantity|int }}</span>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <span>Average Cost:</span>
+                            <span>${{ (user_holding.average_buy_price|default(0))|round(2) }}</span>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <span>Total Value:</span>
+                            <span>${{ ((user_holding.quantity|default(0)) * (stock.current_price|default(0)))|round(2) }}</span>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <span>Profit/Loss:</span>
+                            {% set pl = ((stock.current_price|default(0)) - (user_holding.average_buy_price|default(0))) * (user_holding.quantity|default(0)) %}
+                            {% set pl_percent = ((stock.current_price|default(0)) - (user_holding.average_buy_price|default(0))) / (user_holding.average_buy_price|default(1)) * 100 %}
+                            <span class="{% if pl >= 0 %}text-success{% else %}text-danger{% endif %} fw-bold">
+                                {% if pl >= 0 %}+{% endif %}${{ pl|round(2) }} ({{ pl_percent|round(2) }}%)
+                            </span>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- AI Trading Assistant Modal -->
+<div class="modal fade" id="aiTradeAssistModal" tabindex="-1" aria-labelledby="aiTradeAssistModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info bg-opacity-10">
+                <h5 class="modal-title" id="aiTradeAssistModalLabel">
+                    <i class="bi bi-robot me-2"></i>AI Trading Assistant
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <h6 class="fw-bold mb-3">Trade Summary</h6>
+                
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span class="text-muted">Stock:</span>
+                            <span class="fw-bold">{{ stock.name }} ({{ stock.ticker }})</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span class="text-muted">Current Price:</span>
+                            <span class="fw-bold">${{ (stock.current_price|default(0))|round(2) }}</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span class="text-muted">Action:</span>
+                            <span class="fw-bold trade-action">Buy</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span class="text-muted">Quantity:</span>
+                            <span class="fw-bold trade-quantity">0</span>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <span class="text-muted">Estimated Total:</span>
+                            <span class="fw-bold trade-total">$0.00</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Transactions Button -->
+                <div class="d-grid mb-3">
+                    <button type="button" id="viewTransactionsPromptBtn" class="btn btn-outline-primary">
+                        <i class="bi bi-chat-square-text me-2"></i>Generate and review your prompt first
+                    </button>
+                </div>
+                
+                <!-- AI Prompt View (Hidden by default) -->
+                <div id="transactionsPromptContainer" class="mt-3" style="display: none;">
+                    <h6 class="fw-bold mb-2">AI Trading Assistant Prompt</h6>
+                    <div class="d-grid mb-2">
+                        <button id="copyPromptBtn" class="btn btn-sm btn-outline-secondary">
+                            <i class="bi bi-clipboard me-1"></i>Copy to Clipboard
+                        </button>
+                    </div>
+                    <div style="max-height: 300px; overflow-y: auto;">
+                        <pre id="transactionsPromptContent" class="p-2 bg-light border rounded" style="white-space: pre-wrap; font-family: monospace;" contenteditable="true"><!-- Prompt will be loaded here --></pre>
+                    </div>
+                    <div id="transactionsPromptLoading" class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <span class="ms-2">Generating prompt...</span>
+                    </div>
+                    <div id="transactionsPromptEmpty" class="alert alert-secondary" style="display: none;">
+                        <small>No transactions found to generate prompt.</small>
+                    </div>
+                </div>
+                
+                <!-- AI Response View (Hidden by default) -->
+                <div id="aiResponseContainer" class="mt-3" style="display: none;">
+                    <h6 class="fw-bold mb-2">AI Trading Advice</h6>
+                    <div class="d-flex justify-content-end mb-2">
+                        <button id="resetPromptBtn" class="btn btn-sm btn-outline-secondary">
+                            <i class="bi bi-arrow-left me-1"></i>Edit Prompt
+                        </button>
+                    </div>
+                    <div id="aiResponseContent" class="p-3 bg-light border rounded" style="max-height: 400px; overflow-y: auto;">
+                        <!-- AI Response will be loaded here -->
+                    </div>
+                    <div id="aiResponseLoading" class="text-center py-3">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <span class="ms-2">Getting AI advice...</span>
+                    </div>
+                    <div id="aiResponseError" class="alert alert-danger mt-3" style="display: none;">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                        <span id="aiResponseErrorText">Error processing AI request.</span>
+                    </div>
+                    
+                    <!-- AI Grounding Information -->
+                    <div id="aiGroundingContainer" class="mt-3" style="display: none;">
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#aiGroundingCollapse" aria-expanded="false" aria-controls="aiGroundingCollapse">
+                            <i class="bi bi-info-circle me-1"></i>View Sources
+                        </button>
+                        <div class="collapse mt-2" id="aiGroundingCollapse">
+                            <div class="card card-body">
+                                <small class="text-muted">AI grounding information:</small>
+                                <div id="aiGroundingContent" class="mt-2" style="max-height: 200px; overflow-y: auto; font-size: 0.8rem;">
+                                    <!-- Grounding content will go here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="confirmPromptBtn" class="btn btn-success me-auto" style="display: none;">
+                    <i class="bi bi-check-circle me-1"></i>Confirm my prompt for AI advice
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Transaction History Modal -->
+<div class="modal fade" id="transactionHistoryModal" tabindex="-1" aria-labelledby="transactionHistoryModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-secondary bg-opacity-10">
+                <h5 class="modal-title" id="transactionHistoryModalLabel">
+                    <i class="bi bi-clock-history me-2"></i>Transaction History
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Transactions Table -->
+                <div id="transactionsTableContainer">
+                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-sm table-hover">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Ticker</th>
+                                    <th>Type</th>
+                                    <th>Qty</th>
+                                    <th>Price</th>
+                                    <th>Total</th>
+                                </tr>
+                            </thead>
+                            <tbody id="transactionsTableBody">
+                                <!-- Transactions will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="transactionsLoading" class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <span class="ms-2">Loading transactions...</span>
+                    </div>
+                    <div id="transactionsEmpty" class="alert alert-secondary" style="display: none;">
+                        <small>No transactions found.</small>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- AI Response Modal -->
+<div class="modal fade" id="aiResponseModal" tabindex="-1" aria-labelledby="aiResponseModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <h5 class="modal-title" id="aiResponseModalLabel">
+                    <i class="bi bi-robot me-2"></i>AI Trading Advice
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Trade Summary Card -->
+                <div class="card mb-4">
+                    <div class="card-header bg-light">
+                        <h6 class="fw-bold mb-0">Trade Summary</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3 mb-2">
+                                <span class="text-muted">Stock:</span>
+                                <span class="fw-bold ms-2 trade-summary-stock">{{ stock.name }} ({{ stock.ticker }})</span>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <span class="text-muted">Current Price:</span>
+                                <span class="fw-bold ms-2 trade-summary-price">${{ (stock.current_price|default(0))|round(2) }}</span>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <span class="text-muted">Action:</span>
+                                <span class="fw-bold ms-2 trade-summary-action">Buy</span>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <span class="text-muted">Quantity:</span>
+                                <span class="fw-bold ms-2 trade-summary-quantity">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- AI Response Content -->
+                <div class="ai-response-rendered mb-4">
+                    <!-- AI Response will be rendered here -->
+                </div>
+                
+                <!-- AI Sources/Grounding (Collapsible) -->
+                <div class="ai-sources-section mb-3" style="display: none;">
+                    <button class="btn btn-sm btn-outline-secondary mb-2" type="button" data-bs-toggle="collapse" data-bs-target="#aiSourcesCollapse">
+                        <i class="bi bi-info-circle me-1"></i>View Sources
+                    </button>
+                    <div class="collapse" id="aiSourcesCollapse">
+                        <div class="card">
+                            <div class="card-body">
+                                <small class="text-muted">AI research sources:</small>
+                                <div class="ai-sources-content mt-2" style="max-height: 200px; overflow-y: auto; font-size: 0.85rem;">
+                                    <!-- Sources content will be loaded here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="confirmAdviceBtn" class="btn btn-success">
+                    <i class="bi bi-check-circle me-1"></i>Confirm
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- AI Advice Summary Container (Will be shown in main page after confirmation) -->
+<div id="aiAdviceSummaryContainer" class="card border-info mb-4 mt-3" style="display: none;">
+    <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+        <h6 class="mb-0">
+            <i class="bi bi-robot me-2"></i>AI Trading Advice
+        </h6>
+        <button type="button" class="btn-close" aria-label="Close" id="closeAiAdviceBtn"></button>
+    </div>
+    <div class="card-body p-0">
+        <div id="aiAdviceSummaryContent" class="p-3" style="max-height: 300px; overflow-y: auto;">
+            <!-- AI advice summary will be shown here -->
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Check if Bootstrap is available
+        let bootstrapLoaded = typeof bootstrap !== 'undefined';
+        
+        if (!bootstrapLoaded) {
+            console.warn('Bootstrap JS not found - attempting to load dynamically');
+            
+            // Try to load Bootstrap from CDN
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js';
+            script.integrity = 'sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p';
+            script.crossOrigin = 'anonymous';
+            
+            script.onload = function() {
+                console.log('Bootstrap JS loaded dynamically');
+                bootstrapLoaded = true;
+                initializeApp();
+            };
+            
+            script.onerror = function() {
+                console.error('Failed to load Bootstrap JS');
+                initializeApp();
+            };
+            
+            document.head.appendChild(script);
+        } else {
+            initializeApp();
+        }
+        
+        function initializeApp() {
+            // Stock chart
+            const ctx = document.getElementById('stockChart').getContext('2d');
+            
+            // Parse historical data passed from Python
+            const historicalDataStr = '{{ historical_data|tojson|safe }}';
+            let historicalData = [];
+            try {
+                historicalData = JSON.parse(historicalDataStr);
+            } catch (e) {
+                console.error("Error parsing historical data:", e);
+                historicalData = []; // Provide empty fallback data if parsing fails
+            }
+            
+            // Ensure we have valid data for the chart
+            const dates = historicalData.map(item => item.date || '');
+            const prices = historicalData.map(item => item.close || 0);
+            
+            // Hide message if chart is created
+            const chartMessage = document.getElementById('chart-message');
+
+            // Check condition for creating chart
+            const shouldCreateChart = ctx && dates.length > 0 && prices.length > 0;
+
+            // Only create chart if we have data and a canvas element
+            let stockChart = null; // <-- Declare stockChart outside the if block
+            if (shouldCreateChart) {
+                if (chartMessage) chartMessage.style.display = 'none'; // Hide message
+                stockChart = new Chart(ctx, { // <-- Assign to the outer variable
+                    type: 'line',
+                    data: {
+                        labels: dates,
+                        datasets: [{
+                            label: '{{ stock.ticker }} Price',
+                            data: prices,
+                            borderColor: '{{ stock.change_percent >= 0 and "#28a745" or "#dc3545" }}',
+                            backgroundColor: '{{ stock.change_percent >= 0 and "rgba(40, 167, 69, 0.1)" or "rgba(220, 53, 69, 0.1)" }}',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 5,
+                            tension: 0.1,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {
+                                    label: function(context) {
+                                        const value = context.raw || 0;
+                                        return `$${typeof value === 'number' ? value.toFixed(2) : '0.00'}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: {
+                                    display: false
+                                }
+                            },
+                            y: {
+                                beginAtZero: false,
+                                ticks: {
+                                    callback: function(value) {
+                                        return '$' + (typeof value === 'number' ? value.toFixed(2) : '0.00');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            } else {
+                if (chartMessage) chartMessage.style.display = 'block'; // Ensure message is shown
+            }
+            
+            // Function to update chart data
+            function updateChart(period) {
+                if (!stockChart) return; // Don't do anything if chart wasn't initialized
+
+                fetch(`/api/stock/history/{{ stock.ticker }}?period=${period}`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success && data.data && data.data.length > 0) {
+                            const newDates = data.data.map(item => item.date || '');
+                            const newPrices = data.data.map(item => item.close || 0);
+                            
+                            stockChart.data.labels = newDates;
+                            stockChart.data.datasets[0].data = newPrices;
+                            stockChart.update();
+                            
+                            // Optionally hide message if it was visible
+                            if (chartMessage) chartMessage.style.display = 'none'; 
+                        } else {
+                            console.error("Failed to load chart data for period:", period, data.message);
+                            // Show message if data loading fails
+                            if (chartMessage) chartMessage.style.display = 'block'; 
+                            // Optionally clear chart
+                            // stockChart.data.labels = [];
+                            // stockChart.data.datasets[0].data = [];
+                            // stockChart.update();
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching historical data:', error);
+                        if (chartMessage) chartMessage.style.display = 'block';
+                    });
+            }
+
+            // Add event listeners to period buttons
+            const periodButtons = document.querySelectorAll('.chart-period-btn'); // Add a class to the buttons
+            periodButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    // Remove active class from all buttons
+                    periodButtons.forEach(btn => btn.classList.remove('active'));
+                    // Add active class to the clicked button
+                    this.classList.add('active');
+                    
+                    // Get the period from data attribute
+                    const period = this.dataset.period;
+                    updateChart(period);
+                });
+            });
+
+            // Calculate estimated total when quantity changes
+            const tradeForm = document.getElementById('trade-form');
+            
+            if (tradeForm) {
+                // Get stock price from the page to ensure consistent pricing
+                let stockPrice = 0;
+                try {
+                    stockPrice = parseFloat('{{ stock.current_price|default(0) }}') || 0;
+                    if (isNaN(stockPrice)) stockPrice = 0;
+                } catch (e) {
+                    console.error("Error parsing stock price:", e);
+                    stockPrice = 0;
+                }
+                
+                const hiddenPriceInput = tradeForm.querySelector('input[name="price"]');
+                
+                // Ensure the hidden price input has the correct value
+                if (hiddenPriceInput) {
+                    hiddenPriceInput.value = stockPrice;
+                }
+                
+                const quantityInput = tradeForm.querySelector('input[name="quantity"]');
+                
+                if (quantityInput) {
+                    // Prevent non-numeric input
+                    quantityInput.addEventListener('input', function(e) {
+                        // Replace any non-digit characters except decimal point
+                        this.value = this.value.replace(/[^\d.]/g, '');
+                        // Ensure only one decimal point
+                        if ((this.value.match(/\./g) || []).length > 1) {
+                            this.value = this.value.replace(/\.+$/, '');
+                        }
+                    });
+                    
+                    // Add event listeners for radio buttons
+                    const actionRadios = tradeForm.querySelectorAll('input[name="action"]');
+                    
+                    // Validate form before submission
+                    tradeForm.addEventListener('submit', function(e) {
+                        const quantity = parseFloat(quantityInput.value) || 0;
+                        if (quantity <= 0) {
+                            e.preventDefault();
+                            alert('Please enter a valid quantity greater than 0');
+                            return false;
+                        }
+                        
+                        // Double check that price is set
+                        if (hiddenPriceInput && parseFloat(hiddenPriceInput.value) <= 0) {
+                            hiddenPriceInput.value = stockPrice;
+                        }
+                        
+                        return true;
+                    });
+                } else {
+                    console.error("Quantity input not found. Check the form field names.");
+                }
+            } else {
+                console.error("Trade form element not found. Check the form ID.");
+            }
+            
+            // AI Trading Assistant Modal functionality
+            const aiAssistBtn = document.querySelector('[data-bs-target="#aiTradeAssistModal"]');
+            const tradeActionEl = document.querySelector('.trade-action');
+            const tradeQuantityEl = document.querySelector('.trade-quantity');
+            const tradeTotalEl = document.querySelector('.trade-total');
+            
+            if (aiAssistBtn && tradeActionEl && tradeQuantityEl && tradeTotalEl) {
+                aiAssistBtn.addEventListener('click', function() {
+                    // Get current values from the form
+                    const actionRadios = document.querySelectorAll('input[name="action"]');
+                    let action = 'Buy'; // Default
+                    
+                    for (const radio of actionRadios) {
+                        if (radio.checked) {
+                            action = radio.value === 'buy' ? 'Buy' : 'Sell';
+                            break;
+                        }
+                    }
+                    
+                    const quantityInput = document.querySelector('input[name="quantity"]');
+                    let quantity = 0;
+                    
+                    if (quantityInput) {
+                        try {
+                            quantity = parseInt(quantityInput.value) || 0;
+                        } catch (e) {
+                            console.error('Error parsing quantity:', e);
+                        }
+                    }
+                    
+                    // Calculate total
+                    let stockPrice = 0;
+                    try {
+                        stockPrice = parseFloat('{{ stock.current_price|default(0) }}') || 0;
+                    } catch (e) {
+                        console.error('Error parsing stock price:', e);
+                    }
+                    
+                    const total = (quantity * stockPrice).toFixed(2);
+                    
+                    // Update modal content
+                    tradeActionEl.textContent = action;
+                    tradeQuantityEl.textContent = quantity;
+                    tradeTotalEl.textContent = '$' + total;
+                    
+                    // Add appropriate classes based on action
+                    tradeActionEl.classList.remove('text-success', 'text-danger');
+                    tradeActionEl.classList.add(action === 'Buy' ? 'text-success' : 'text-danger');
+                    
+                    // Hide transactions table when opening modal
+                    document.getElementById('transactionsTableContainer').style.display = 'none';
+                    document.getElementById('transactionsPromptContainer').style.display = 'none';
+                    
+                    // Hide the confirm button when opening modal
+                    const confirmPromptBtn = document.getElementById('confirmPromptBtn');
+                    if (confirmPromptBtn) {
+                        confirmPromptBtn.style.display = 'none';
+                    }
+                });
+            }
+            
+            // View Transactions Button functionality
+            const viewTransactionsBtn = document.getElementById('viewTransactionsBtn');
+            const viewTransactionsPromptBtn = document.getElementById('viewTransactionsPromptBtn');
+            
+            // Set up transaction history elements references
+            let transactionsTableContainer = document.getElementById('transactionsTableContainer');
+            let transactionsTableBody = document.getElementById('transactionsTableBody');
+            let transactionsLoading = document.getElementById('transactionsLoading');
+            let transactionsEmpty = document.getElementById('transactionsEmpty');
+            
+            // Prompt elements
+            const transactionsPromptContainer = document.getElementById('transactionsPromptContainer');
+            const transactionsPromptContent = document.getElementById('transactionsPromptContent');
+            const transactionsPromptLoading = document.getElementById('transactionsPromptLoading');
+            const transactionsPromptEmpty = document.getElementById('transactionsPromptEmpty');
+            
+            // Function to fetch and process transactions
+            function fetchTransactions(displayCallback) {
+                return fetch('/api/transactions/recent')
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success && data.transactions && data.transactions.length > 0) {
+                            // Call the display callback with the transactions
+                            displayCallback(data.transactions);
+                            return true;
+                        } else {
+                            // Call the display callback with an empty array
+                            displayCallback([]);
+                            return false;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching transactions:', error);
+                        // Call the callback with an empty array on error
+                        displayCallback([]);
+                        return false;
+                    });
+            }
+            
+            // View Transaction History Button functionality
+            if (viewTransactionsBtn) {
+                viewTransactionsBtn.addEventListener('click', function() {
+                    try {
+                        // Get the modal element
+                        const transactionHistoryModal = document.getElementById('transactionHistoryModal');
+                        
+                        if (!transactionHistoryModal) {
+                            console.error('Transaction history modal element not found');
+                            alert('Transaction history modal not found');
+                            return;
+                        }
+                        
+                        // Create a new Modal instance if it doesn't exist yet
+                        let modalInstance = bootstrap.Modal.getInstance(transactionHistoryModal);
+                        if (!modalInstance) {
+                            console.log('Creating new modal instance');
+                            modalInstance = new bootstrap.Modal(transactionHistoryModal);
+                        }
+                        
+                        // Show the modal
+                        try {
+                            // Try the Bootstrap way first
+                            modalInstance.show();
+                        } catch (err) {
+                            console.warn('Bootstrap modal show failed, trying alternative method:', err);
+                            // Try jQuery if available
+                            if (typeof $ !== 'undefined') {
+                                $(transactionHistoryModal).modal('show');
+                            } else if (transactionHistoryModal.classList) {
+                                // Bare minimum CSS-based fallback
+                                transactionHistoryModal.classList.add('show');
+                                transactionHistoryModal.style.display = 'block';
+                                document.body.classList.add('modal-open');
+                                
+                                // Add backdrop
+                                const backdrop = document.createElement('div');
+                                backdrop.className = 'modal-backdrop fade show';
+                                document.body.appendChild(backdrop);
+                                
+                                // Add close handler
+                                const closeButtons = transactionHistoryModal.querySelectorAll('[data-bs-dismiss="modal"]');
+                                closeButtons.forEach(button => {
+                                    button.addEventListener('click', function() {
+                                        transactionHistoryModal.classList.remove('show');
+                                        transactionHistoryModal.style.display = 'none';
+                                        document.body.classList.remove('modal-open');
+                                        const backdrop = document.querySelector('.modal-backdrop');
+                                        if (backdrop) backdrop.remove();
+                                    });
+                                });
+                            }
+                        }
+                        
+                        // Clear and show loading indicator
+                        transactionsTableBody.innerHTML = '';
+                        transactionsLoading.style.display = 'block';
+                        transactionsEmpty.style.display = 'none';
+                        
+                        // Fetch and display transactions
+                        fetchTransactions(transactions => {
+                            // Hide loading indicator
+                            transactionsLoading.style.display = 'none';
+                            
+                            // Populate table with transactions
+                            transactions.forEach(transaction => {
+                                const row = document.createElement('tr');
+                                row.className = transaction.transaction_type === 'buy' ? 'table-success' : 'table-danger';
+                                
+                                // Format date
+                                const date = new Date(transaction.timestamp);
+                                const formattedDate = date.toLocaleDateString() + ' ' + 
+                                                    date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                                
+                                row.innerHTML = `
+                                    <td>${formattedDate}</td>
+                                    <td>${transaction.ticker}</td>
+                                    <td>${transaction.transaction_type === 'buy' ? 'Buy' : 'Sell'}</td>
+                                    <td>${transaction.quantity}</td>
+                                    <td>$${parseFloat(transaction.price).toFixed(2)}</td>
+                                    <td>$${parseFloat(transaction.total_amount).toFixed(2)}</td>
+                                `;
+                                
+                                transactionsTableBody.appendChild(row);
+                            });
+                        })
+                        .catch(error => {
+                            console.error('Error fetching transactions:', error);
+                            transactionsLoading.style.display = 'none';
+                            transactionsEmpty.style.display = 'block';
+                            transactionsEmpty.innerHTML = '<small>Error loading transactions. Please try again.</small>';
+                        })
+                        .then(hasTransactions => {
+                            if (!hasTransactions) {
+                                transactionsEmpty.style.display = 'block';
+                            }
+                        });
+                    } catch (error) {
+                        console.error('Error opening transaction history modal:', error);
+                        alert('Failed to open transaction history. Error: ' + error.message);
+                    }
+                });
+            }
+            
+            // View Transactions Prompt Button functionality
+            if (viewTransactionsPromptBtn) {
+                viewTransactionsPromptBtn.addEventListener('click', function() {
+                    // Hide other views
+                    transactionsTableContainer.style.display = 'none';
+                    
+                    // Toggle display of transactions prompt
+                    if (transactionsPromptContainer.style.display === 'none') {
+                        // Show the container and loading indicator
+                        transactionsPromptContainer.style.display = 'block';
+                        transactionsPromptLoading.style.display = 'block';
+                        transactionsPromptEmpty.style.display = 'none';
+                        transactionsPromptContent.textContent = '';
+                        
+                        // Hide the confirm button while loading
+                        const confirmPromptBtn = document.getElementById('confirmPromptBtn');
+                        if (confirmPromptBtn) {
+                            confirmPromptBtn.style.display = 'none';
+                        }
+                        
+                        // Fetch and display transactions prompt
+                        fetchTransactions(transactions => {
+                            // Hide loading indicator
+                            transactionsPromptLoading.style.display = 'none';
+                            
+                            // Group transactions by ticker (if any)
+                            const tickerGroups = {};
+                            if (transactions && transactions.length > 0) {
+                                transactions.forEach(transaction => {
+                                    if (!tickerGroups[transaction.ticker]) {
+                                        tickerGroups[transaction.ticker] = [];
+                                    }
+                                    tickerGroups[transaction.ticker].push(transaction);
+                                });
+                            }
+                            
+                            // Get stock details and handle possible undefined values
+                            let stockPrice = 0;
+                            let stockChange = 0;
+                            let stockChangePercent = 0;
+                            let stockMarketCap = 0;
+                            let stockPE = 0;
+                            let stockYearLow = 0;
+                            let stockYearHigh = 0;
+                            
+                            try {
+                                stockPrice = parseFloat('{{ stock.current_price|default(0) }}') || 0;
+                                stockChange = parseFloat('{{ stock.change|default(0) }}') || 0;
+                                stockChangePercent = parseFloat('{{ stock.change_percent|default(0) }}') || 0;
+                                stockMarketCap = parseFloat('{{ stock.market_cap|default(0) }}') || 0;
+                                stockPE = parseFloat('{{ stock.pe_ratio|default(0) }}') || 0;
+                                stockYearLow = parseFloat('{{ stock.year_low|default(0) }}') || 0;
+                                stockYearHigh = parseFloat('{{ stock.year_high|default(0) }}') || 0;
+                            } catch (e) {
+                                console.error('Error parsing stock data:', e);
+                            }
+                            
+                            // Get current action and quantity from the form
+                            let actionRadios = document.querySelectorAll('input[name="action"]');
+                            let currentAction = 'buy'; // Default
+                            for (let radio of actionRadios) {
+                                if (radio.checked) {
+                                    currentAction = radio.value;
+                                    break;
+                                }
+                            }
+                            
+                            const quantityInput = document.querySelector('input[name="quantity"]');
+                            let currentQuantity = quantityInput ? (quantityInput.value || '0') : '0';
+                            
+                            let prompt = `You are an AI trading assistant helping me with trading decisions for {{ stock.ticker }} ({{ stock.name }}).
+
+The current stock information:
+- Current Price: $${stockPrice.toFixed(2)}
+- Change: ${stockChangePercent >= 0 ? '+' : ''}${stockChange.toFixed(2)} (${stockChangePercent.toFixed(2)}%)
+- Market Cap: $${(stockMarketCap / 1000000000).toFixed(2)}B
+- P/E Ratio: ${stockPE.toFixed(2)}
+- 52-Week Range: $${stockYearLow.toFixed(2)} - $${stockYearHigh.toFixed(2)}
+
+I'm considering a ${currentAction.toUpperCase()} order of ${currentQuantity} shares.
+
+`;
+                            
+                            // Fetch portfolio data
+                            fetch('/api/portfolio/summary')
+                                .then(response => {
+                                    if (!response.ok) {
+                                        throw new Error(`HTTP error! status: ${response.status}`);
+                                    }
+                                    return response.json();
+                                })
+                                .then(portfolioData => {
+                                    if (portfolioData.success && portfolioData.portfolio) {
+                                        const portfolio = portfolioData.portfolio;
+                                        
+                                        // Add portfolio information to the prompt
+                                        prompt += `My current portfolio summary:
+- Cash Balance: $${parseFloat(portfolio.cash_balance).toFixed(2)}
+- Portfolio Value: $${parseFloat(portfolio.portfolio_value).toFixed(2)}
+- Total Account Value: $${parseFloat(portfolio.total_account_value).toFixed(2)}
+- Total Profit/Loss: ${portfolio.total_profit_loss >= 0 ? '+' : ''}$${parseFloat(Math.abs(portfolio.total_profit_loss)).toFixed(2)} (${portfolio.total_profit_loss_percent >= 0 ? '+' : ''}${parseFloat(portfolio.total_profit_loss_percent).toFixed(2)}%)
+
+Current Holdings:
+`;
+                                        
+                                        if (portfolio.holdings && portfolio.holdings.length > 0) {
+                                            portfolio.holdings.forEach(holding => {
+                                                const profitLoss = parseFloat(holding.profit);
+                                                const profitLossPercent = parseFloat(holding.profit_percent);
+                                                
+                                                prompt += `- ${holding.ticker} (${holding.company_name}): ${holding.quantity} shares @ $${parseFloat(holding.average_price).toFixed(2)}, Current Price: $${parseFloat(holding.current_price).toFixed(2)}, Market Value: $${parseFloat(holding.market_value).toFixed(2)}, P/L: ${profitLoss >= 0 ? '+' : ''}$${Math.abs(profitLoss).toFixed(2)} (${profitLossPercent >= 0 ? '+' : ''}${profitLossPercent.toFixed(2)}%)\n`;
+                                            });
+                                        } else {
+                                            prompt += `- No current holdings\n`;
+                                        }
+                                        
+                                        prompt += `\n`;
+                                    }
+                                    
+                                    // Add transaction history section only if there are transactions
+                                    if (transactions && transactions.length > 0) {
+                                        prompt += `Here is my transaction history:\n\n`;
+                                        
+                                        // First, add a summary
+                                        const totalBuys = transactions.filter(t => t.transaction_type === 'buy').length;
+                                        const totalSells = transactions.filter(t => t.transaction_type === 'sell').length;
+                                        
+                                        prompt += 'TRANSACTION SUMMARY:\n';
+                                        prompt += `Total transactions: ${transactions.length}\n`;
+                                        prompt += `Buy transactions: ${totalBuys}\n`;
+                                        prompt += `Sell transactions: ${totalSells}\n\n`;
+                                        
+                                        // Then add transaction details grouped by ticker
+                                        prompt += 'TRANSACTION HISTORY BY STOCK:\n\n';
+                                        
+                                        Object.keys(tickerGroups).forEach(ticker => {
+                                            const tickerTransactions = tickerGroups[ticker];
+                                            
+                                            prompt += `${ticker} - ${tickerTransactions.length} transactions\n`;
+                                            prompt += '----------------\n';
+                                            
+                                            tickerTransactions.forEach((transaction, index) => {
+                                                const date = new Date(transaction.timestamp);
+                                                const formattedDate = date.toLocaleDateString() + ' ' + 
+                                                                    date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                                                
+                                                const action = transaction.transaction_type === 'buy' ? 'Bought' : 'Sold';
+                                                
+                                                prompt += `${action} ${transaction.quantity} shares at $${parseFloat(transaction.price).toFixed(2)} per share (Total: $${parseFloat(transaction.total_amount).toFixed(2)}) on ${formattedDate}\n`;
+                                            });
+                                            
+                                            prompt += '\n';
+                                        });
+                                    } else {
+                                        // No transaction history available
+                                        prompt += `I am a new trader with no transaction history yet.\n\n`;
+                                    }
+                                    
+                                    // Add instructions for the AI - adjusted for users with or without transaction history
+                                    prompt += `Please do a search on the internet for the recent relevant news to get a better understanding about the stock and the current overall market.
+Then based on`;
+                                    
+                                    if (transactions && transactions.length > 0) {
+                                        prompt += ` my personal portfolio, transaction history,`;
+                                    } else {
+                                        prompt += ` my personal portfolio,`;
+                                    }
+                                    
+                                    prompt += ` the current stock information, and relevant news, market situation and trends,
+make a recommendation for my proposed ${currentAction.toUpperCase()} order of ${currentQuantity} shares of {{ stock.ticker }}.
+Specifically, please provide:`;
+
+                                    if (transactions && transactions.length > 0) {
+                                        prompt += `
+1. An analysis of my trading patterns, preferences, and portfolio diversification`;
+                                    } else {
+                                        prompt += `
+1. A beginner-friendly analysis based on my portfolio composition`;
+                                    }
+                                    
+                                    prompt += `
+2. A specific recommendation for my proposed ${currentAction.toUpperCase()} order of ${currentQuantity} shares of {{ stock.ticker }} considering my current holdings and cash balance
+3. Alternative trading strategies I could consider
+4. Any potential risks or opportunities to be aware of.  `;
+                                    
+                                    // Show prompt content
+                                    transactionsPromptContent.textContent = prompt;
+                                    
+                                    // Show the confirm button now that the prompt is ready
+                                    if (confirmPromptBtn) {
+                                        confirmPromptBtn.style.display = 'block';
+                                    }
+                                    
+                                    // Set up copy to clipboard button
+                                    const copyPromptBtn = document.getElementById('copyPromptBtn');
+                                    if (copyPromptBtn) {
+                                        copyPromptBtn.addEventListener('click', function() {
+                                            // Get the current content of the editable prompt area
+                                            const currentPromptText = transactionsPromptContent.textContent;
+                                            
+                                            navigator.clipboard.writeText(currentPromptText).then(
+                                                function() {
+                                                    // Success
+                                                    const originalText = copyPromptBtn.innerHTML;
+                                                    copyPromptBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Copied!';
+                                                    setTimeout(function() {
+                                                        copyPromptBtn.innerHTML = originalText;
+                                                    }, 2000);
+                                                },
+                                                function() {
+                                                    // Error
+                                                    console.error('Failed to copy text to clipboard');
+                                                    alert('Failed to copy text to clipboard');
+                                                }
+                                            );
+                                        });
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Error fetching portfolio data:', error);
+                                    
+                                    // Generate prompt with just stock info and transaction history (if available)
+                                    if (transactions && transactions.length > 0) {
+                                        prompt += `Here is my transaction history:\n\n`;
+                                        
+                                        // First, add a summary
+                                        const totalBuys = transactions.filter(t => t.transaction_type === 'buy').length;
+                                        const totalSells = transactions.filter(t => t.transaction_type === 'sell').length;
+                                        
+                                        prompt += 'TRANSACTION SUMMARY:\n';
+                                        prompt += `Total transactions: ${transactions.length}\n`;
+                                        prompt += `Buy transactions: ${totalBuys}\n`;
+                                        prompt += `Sell transactions: ${totalSells}\n\n`;
+                                        
+                                        // Then add transaction details grouped by ticker
+                                        prompt += 'TRANSACTION HISTORY BY STOCK:\n\n';
+                                        
+                                        Object.keys(tickerGroups).forEach(ticker => {
+                                            const tickerTransactions = tickerGroups[ticker];
+                                            
+                                            prompt += `${ticker} - ${tickerTransactions.length} transactions\n`;
+                                            prompt += '----------------\n';
+                                            
+                                            tickerTransactions.forEach((transaction, index) => {
+                                                const date = new Date(transaction.timestamp);
+                                                const formattedDate = date.toLocaleDateString() + ' ' + 
+                                                                    date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                                                
+                                                const action = transaction.transaction_type === 'buy' ? 'Bought' : 'Sold';
+                                                
+                                                prompt += `${action} ${transaction.quantity} shares at $${parseFloat(transaction.price).toFixed(2)} per share (Total: $${parseFloat(transaction.total_amount).toFixed(2)}) on ${formattedDate}\n`;
+                                            });
+                                            
+                                            prompt += '\n';
+                                        });
+                                    } else {
+                                        // No transaction history available
+                                        prompt += `I am a new trader with no transaction history yet.\n\n`;
+                                    }
+                                    
+                                    // Add instructions for the AI
+                                    prompt += `Please do a search on the internet for the recent relevant news to get a better understanding about the stock and the current overall market.
+Then based on`;
+                                    
+                                    if (transactions && transactions.length > 0) {
+                                        prompt += ` my personal transaction history,`;
+                                    }
+                                    
+                                    prompt += ` the current stock information, and relevant news, market situation and trends,
+make a recommendation for my proposed ${currentAction.toUpperCase()} order of ${currentQuantity} shares of {{ stock.ticker }}.
+Specifically, please provide:`;
+
+                                    if (transactions && transactions.length > 0) {
+                                        prompt += `
+1. An analysis of my trading patterns and preferences`;
+                                    } else {
+                                        prompt += `
+1. A beginner-friendly analysis of the stock`;
+                                    }
+                                    
+                                    prompt += `
+2. A specific recommendation for my proposed ${currentAction.toUpperCase()} order of ${currentQuantity} shares of {{ stock.ticker }}
+3. Alternative trading strategies I could consider
+4. Any potential risks or opportunities to be aware of.  `;
+                                    
+                                    // Show prompt content
+                                    transactionsPromptContent.textContent = prompt;
+                                    
+                                    // Show the confirm button now that the prompt is ready
+                                    if (confirmPromptBtn) {
+                                        confirmPromptBtn.style.display = 'block';
+                                    }
+                                    
+                                    // Set up copy to clipboard button
+                                    const copyPromptBtn = document.getElementById('copyPromptBtn');
+                                    if (copyPromptBtn) {
+                                        copyPromptBtn.addEventListener('click', function() {
+                                            // Get the current content of the editable prompt area
+                                            const currentPromptText = transactionsPromptContent.textContent;
+                                            
+                                            navigator.clipboard.writeText(currentPromptText).then(
+                                                function() {
+                                                    // Success
+                                                    const originalText = copyPromptBtn.innerHTML;
+                                                    copyPromptBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Copied!';
+                                                    setTimeout(function() {
+                                                        copyPromptBtn.innerHTML = originalText;
+                                                    }, 2000);
+                                                },
+                                                function() {
+                                                    // Error
+                                                    console.error('Failed to copy text to clipboard');
+                                                    alert('Failed to copy text to clipboard');
+                                                }
+                                            );
+                                        });
+                                    }
+                                });
+                        });
+                    } else {
+                        // Hide the transactions prompt
+                        transactionsPromptContainer.style.display = 'none';
+                        
+                        // Also hide the confirm button
+                        const confirmPromptBtn = document.getElementById('confirmPromptBtn');
+                        if (confirmPromptBtn) {
+                            confirmPromptBtn.style.display = 'none';
+                        }
+                    }
+                });
+            }
+            
+            // Confirm Prompt Button functionality
+            const confirmPromptBtn = document.getElementById('confirmPromptBtn');
+            if (confirmPromptBtn) {
+                confirmPromptBtn.addEventListener('click', function() {
+                    // Check if the prompt is visible
+                    if (transactionsPromptContainer.style.display === 'block' &&
+                        transactionsPromptContent.textContent.trim() !== '') {
+                        
+                        // Get the current content of the editable prompt area
+                        const currentPromptText = transactionsPromptContent.textContent;
+                        
+                        // Hide prompt container and show AI response elements
+                        transactionsPromptContainer.style.display = 'none';
+                        const aiResponseContainer = document.getElementById('aiResponseContainer');
+                        const aiResponseLoading = document.getElementById('aiResponseLoading');
+                        const aiResponseContent = document.getElementById('aiResponseContent');
+                        const aiResponseError = document.getElementById('aiResponseError');
+                        const aiResponseErrorText = document.getElementById('aiResponseErrorText');
+                        const aiGroundingContainer = document.getElementById('aiGroundingContainer');
+                        const aiGroundingContent = document.getElementById('aiGroundingContent');
+                        
+                        // Show response container and loading indicator
+                        aiResponseContainer.style.display = 'block';
+                        aiResponseLoading.style.display = 'block';
+                        aiResponseContent.style.display = 'none';
+                        aiResponseError.style.display = 'none';
+                        aiGroundingContainer.style.display = 'none';
+                        
+                        // Send the prompt to our AI API
+                        fetch('/api/ai/advice', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                prompt: currentPromptText
+                            })
+                        })
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error(`HTTP error! status: ${response.status}`);
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            // Hide loading indicator
+                            aiResponseLoading.style.display = 'none';
+                            
+                            if (data.success) {
+                                // Close the AI assistant modal
+                                const aiTradeAssistModal = bootstrap.Modal.getInstance(document.getElementById('aiTradeAssistModal'));
+                                if (aiTradeAssistModal) {
+                                    aiTradeAssistModal.hide();
+                                }
+                                
+                                // Prepare the new response modal
+                                const responseModal = new bootstrap.Modal(document.getElementById('aiResponseModal'));
+                                
+                                // Update trade summary in the new modal
+                                const actionElement = document.querySelector('.trade-action');
+                                const quantityElement = document.querySelector('.trade-quantity');
+                                const totalElement = document.querySelector('.trade-total');
+                                
+                                document.querySelector('.trade-summary-action').textContent = actionElement ? actionElement.textContent : 'Buy';
+                                document.querySelector('.trade-summary-quantity').textContent = quantityElement ? quantityElement.textContent : '0';
+                                
+                                // Render the AI response with markdown
+                                const aiResponseRendered = document.querySelector('.ai-response-rendered');
+                                
+                                try {
+                                    // Check if marked library is available
+                                    if (typeof marked !== 'undefined') {
+                                        const renderer = new marked.Renderer();
+                                        
+                                        // Configure marked options for better formatting
+                                        marked.setOptions({
+                                            renderer: renderer,
+                                            gfm: true,
+                                            breaks: true,
+                                            sanitize: false,
+                                            smartLists: true
+                                        });
+                                        
+                                        // Add class to allow styling
+                                        aiResponseRendered.classList.add('ai-advice-content');
+                                        
+                                        // Render the markdown
+                                        aiResponseRendered.innerHTML = marked.parse(data.advice);
+                    } else {
+                                        // Improved fallback formatting
+                                        aiResponseRendered.classList.add('ai-advice-content');
+                                        const formattedText = data.advice
+                                            .replace(/\n\n/g, '</p><p>')
+                                            .replace(/\n/g, '<br>')
+                                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                                            .replace(/^# (.*?)$/gm, '<h1>$1</h1>')
+                                            .replace(/^## (.*?)$/gm, '<h2>$1</h2>')
+                                            .replace(/^### (.*?)$/gm, '<h3>$1</h3>')
+                                            .replace(/^#### (.*?)$/gm, '<h4>$1</h4>');
+                                        aiResponseRendered.innerHTML = `<p>${formattedText}</p>`;
+                                    }
+                                } catch (error) {
+                                    console.error('Error rendering markdown:', error);
+                                    aiResponseRendered.innerHTML = `<p>${data.advice.replace(/\n/g, '<br>')}</p>`;
+                                }
+                                
+                                // Show grounding information if available
+                                const aiSourcesSection = document.querySelector('.ai-sources-section');
+                                const aiSourcesContent = document.querySelector('.ai-sources-content');
+                                
+                                if (data.grounding_metadata && data.grounding_metadata.search_results) {
+                                    aiSourcesSection.style.display = 'block';
+                                    aiSourcesContent.innerHTML = data.grounding_metadata.search_results;
+                                } else {
+                                    aiSourcesSection.style.display = 'none';
+                                }
+                                
+                                // Show the new modal
+                                responseModal.show();
+                                
+                                // Store the AI response data for use when confirming
+                                window.aiAdviceData = {
+                                    advice: data.advice,
+                                    grounding: data.grounding_metadata
+                                };
+                                
+                            } else {
+                                // Show error message in the original modal
+                                aiResponseError.style.display = 'block';
+                                aiResponseErrorText.textContent = data.error || 'Error getting AI advice';
+                            }
+                        })
+                        .catch(error => {
+                            // Hide loading indicator and show error
+                            aiResponseLoading.style.display = 'none';
+                            aiResponseError.style.display = 'block';
+                            
+                            // More informative error message based on the error
+                            let errorMessage = error.message || 'Error connecting to AI service';
+                            
+                            // For HTTP 500 errors, provide more helpful troubleshooting information
+                            if (error.message && error.message.includes('status: 500')) {
+                                errorMessage = 'The AI service is experiencing issues. This may be related to the Gemini API configuration. ' +
+                                              'Please try again later or contact the administrator to check if the API key is set up correctly.';
+                            } else if (error.message && error.message.includes('status: 401')) {
+                                errorMessage = 'Authentication error with the AI service. The API key may be invalid. ' +
+                                              'Please contact the administrator to verify the API configuration.';
+                            } else if (error.message && error.message.includes('status: 403')) {
+                                errorMessage = 'Access denied to the AI service. The API key may have insufficient permissions. ' +
+                                              'Please contact the administrator to verify the API configuration.';
+                            } else if (!navigator.onLine) {
+                                errorMessage = 'You appear to be offline. Please check your internet connection and try again.';
+                            }
+                            
+                            aiResponseErrorText.textContent = errorMessage;
+                            console.error('Error getting AI advice:', error);
+                        });
+                    }
+                });
+            }
+
+            // Reset Prompt Button functionality
+            const resetPromptBtn = document.getElementById('resetPromptBtn');
+            if (resetPromptBtn) {
+                resetPromptBtn.addEventListener('click', function() {
+                    // Hide the AI response container and show the prompt container
+                    const aiResponseContainer = document.getElementById('aiResponseContainer');
+                    const transactionsPromptContainer = document.getElementById('transactionsPromptContainer');
+                    if (aiResponseContainer && transactionsPromptContainer) {
+                        aiResponseContainer.style.display = 'none';
+                        transactionsPromptContainer.style.display = 'block';
+                        
+                        // Make sure the confirm button is visible when returning to edit the prompt
+                        const confirmPromptBtn = document.getElementById('confirmPromptBtn');
+                        if (confirmPromptBtn) {
+                            confirmPromptBtn.style.display = 'block';
+                        }
+                    }
+                });
+            }
+
+            // Add event handler for the confirm advice button in the response modal
+            const confirmAdviceBtn = document.getElementById('confirmAdviceBtn');
+            if (confirmAdviceBtn) {
+                confirmAdviceBtn.addEventListener('click', function() {
+                    // Close the response modal
+                    const responseModal = bootstrap.Modal.getInstance(document.getElementById('aiResponseModal'));
+                    if (responseModal) {
+                        responseModal.hide();
+                    }
+                    
+                    // Also make sure the assistant modal is closed
+                    const aiTradeAssistModal = bootstrap.Modal.getInstance(document.getElementById('aiTradeAssistModal'));
+                    if (aiTradeAssistModal) {
+                        aiTradeAssistModal.hide();
+                    }
+                    
+                    // Show the AI advice summary in the main page
+                    const aiAdviceSummaryContainer = document.getElementById('aiAdviceSummaryContainer');
+                    const aiAdviceSummaryContent = document.getElementById('aiAdviceSummaryContent');
+                    
+                    if (aiAdviceSummaryContainer && aiAdviceSummaryContent && window.aiAdviceData) {
+                        // Position the advice container in the DOM if not already done
+                        // Get the AI assist button
+                        const aiAssistBtn = document.querySelector('[data-bs-target="#aiTradeAssistModal"]');
+                        
+                        if (aiAssistBtn && aiAssistBtn.parentNode) {
+                            // Ensure container is initially removed from DOM to avoid duplicate placement
+                            if (aiAdviceSummaryContainer.parentNode) {
+                                aiAdviceSummaryContainer.parentNode.removeChild(aiAdviceSummaryContainer);
+                            }
+                            
+                            // Insert the advice container directly after the AI assist button's parent div
+                            aiAssistBtn.parentNode.parentNode.insertBefore(
+                                aiAdviceSummaryContainer, 
+                                aiAssistBtn.parentNode.nextSibling
+                            );
+                        }
+                        
+                        // Update the summary content - use more complete extract of the advice
+                        try {
+                            let summaryText = window.aiAdviceData.advice;
+                            
+                            // Don't try to extract specific sections, just use the full advice text
+                            // This ensures we always show complete advice rather than potentially cutting it off
+                            
+                            // Add styling for better readability
+                            aiAdviceSummaryContent.style.maxHeight = '300px'; // Increased height
+                            aiAdviceSummaryContent.style.overflowY = 'auto';
+                            aiAdviceSummaryContent.style.padding = '10px';
+                            
+                            // Format using markdown if available
+                            if (typeof marked !== 'undefined') {
+                                const renderer = new marked.Renderer();
+                                
+                                // Configure marked options for better formatting
+                                marked.setOptions({
+                                    renderer: renderer,
+                                    gfm: true,
+                                    breaks: true,
+                                    sanitize: false,
+                                    smartLists: true
+                                });
+                                
+                                // Add class to allow styling
+                                aiAdviceSummaryContent.classList.add('ai-advice-content');
+                                
+                                // Render the markdown
+                                aiAdviceSummaryContent.innerHTML = marked.parse(summaryText);
+                            } else {
+                                // Improved fallback formatting
+                                aiAdviceSummaryContent.classList.add('ai-advice-content');
+                                const formattedText = summaryText
+                                    .replace(/\n\n/g, '</p><p>')
+                                    .replace(/\n/g, '<br>')
+                                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                                    .replace(/^# (.*?)$/gm, '<h1>$1</h1>')
+                                    .replace(/^## (.*?)$/gm, '<h2>$1</h2>')
+                                    .replace(/^### (.*?)$/gm, '<h3>$1</h3>')
+                                    .replace(/^#### (.*?)$/gm, '<h4>$1</h4>');
+                                aiAdviceSummaryContent.innerHTML = `<p>${formattedText}</p>`;
+                            }
+                            
+                            // Ensure proper styling
+                            aiAdviceSummaryContainer.style.display = 'block';
+                            aiAdviceSummaryContainer.style.width = '100%';
+                            
+                            // Add click handler for close button
+                            const closeAiAdviceBtn = document.getElementById('closeAiAdviceBtn');
+                            if (closeAiAdviceBtn) {
+                                closeAiAdviceBtn.onclick = function() {
+                                    aiAdviceSummaryContainer.style.display = 'none';
+                                };
+                            }
+
+                            // Scroll to make the advice visible
+                            setTimeout(() => {
+                                aiAdviceSummaryContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 100);
+                        } catch (error) {
+                            console.error('Error showing AI advice summary:', error);
+                        }
+                    }
+                });
+            }
+
+            // Load the marked library for markdown rendering if not already loaded
+            if (typeof marked === 'undefined') {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/marked/marked.min.js';
+                script.onload = function() {
+                    console.log('Marked.js library loaded for markdown rendering');
+                };
+                script.onerror = function() {
+                    console.warn('Failed to load Marked.js library for markdown rendering');
+                };
+                document.head.appendChild(script);
+            }
+
+            // Set up event handlers more reliably using delegation
+            document.addEventListener('click', function(event) {
+                // Copy Prompt Button
+                if (event.target.matches('#copyPromptBtn') || event.target.closest('#copyPromptBtn')) {
+                    const transactionsPromptContent = document.getElementById('transactionsPromptContent');
+                    if (transactionsPromptContent) {
+                        // Get the current content of the editable prompt area
+                        const currentPromptText = transactionsPromptContent.textContent;
+                        
+                        navigator.clipboard.writeText(currentPromptText).then(
+                            function() {
+                                // Success
+                                const copyPromptBtn = document.getElementById('copyPromptBtn');
+                                if (copyPromptBtn) {
+                                    const originalText = copyPromptBtn.innerHTML;
+                                    copyPromptBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Copied!';
+                                    setTimeout(function() {
+                                        copyPromptBtn.innerHTML = originalText;
+                                    }, 2000);
+                                }
+                            },
+                            function() {
+                                // Error
+                                console.error('Failed to copy text to clipboard');
+                                alert('Failed to copy text to clipboard');
+                            }
+                        );
+                    }
+                }
+                
+                // Reset Prompt Button
+                if (event.target.matches('#resetPromptBtn') || event.target.closest('#resetPromptBtn')) {
+                    // Hide the AI response container and show the prompt container
+                    const aiResponseContainer = document.getElementById('aiResponseContainer');
+                    const transactionsPromptContainer = document.getElementById('transactionsPromptContainer');
+                    if (aiResponseContainer && transactionsPromptContainer) {
+                        aiResponseContainer.style.display = 'none';
+                        transactionsPromptContainer.style.display = 'block';
+                        
+                        // Make sure the confirm button is visible when returning to edit the prompt
+                        const confirmPromptBtn = document.getElementById('confirmPromptBtn');
+                        if (confirmPromptBtn) {
+                            confirmPromptBtn.style.display = 'block';
+                        }
+                    }
+                }
+                
+                // Close AI Advice Summary Button
+                if (event.target.matches('#closeAiAdviceBtn') || event.target.closest('#closeAiAdviceBtn')) {
+                    const aiAdviceSummaryContainer = document.getElementById('aiAdviceSummaryContainer');
+                    if (aiAdviceSummaryContainer) {
+                        aiAdviceSummaryContainer.style.display = 'none';
+                    }
+                }
+            });
+        }
+    });
+</script>
+{% endblock %} 
