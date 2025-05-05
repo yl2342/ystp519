@@ -36,7 +36,13 @@ def create_app(config_class=None):
     
     # Configure app from environment variables
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-for-testing')
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://ytsp_server:cpsc519sp25@localhost:5432/ytsp')
+    
+    # Adjust for Render's PostgreSQL connection string if needed
+    db_url = os.getenv('DATABASE_URL', 'postgresql://ytsp_server:cpsc519sp25@localhost:5432/ytsp')
+    # Render uses postgres:// instead of postgresql:// in their connection strings
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  # Disable to improve performance
     
     # Basic CAS configuration - use simpler, minimal config

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: yale-trading-platform
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn run:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.7
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ytsp-db
+          property: connectionString
+      - key: FLASK_APP
+        value: run.py
+
+databases:
+  - name: ytsp-db
+    plan: free
+    databaseName: ytsp
+    user: ytsp_server 
